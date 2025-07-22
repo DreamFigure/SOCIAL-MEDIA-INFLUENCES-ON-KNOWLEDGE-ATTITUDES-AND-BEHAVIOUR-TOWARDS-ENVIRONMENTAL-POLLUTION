@@ -1,0 +1,265 @@
+library(tidyverse)
+library(summarytools)
+library(dlookr)
+library(psych)      
+library(car)         
+library(lmtest)      
+library(factoextra) 
+library(tidytext)
+library(readxl)
+library(GPArotation)
+library(lavaan)
+library(semPlot)
+Data_1 <- read_excel("ITEMS ADJUST SURVEY DATASET ONLINE ADVOCACY AND SOCIAL MEDIA'S ROLE IN COMMUNICATING EFFECTS OF EP.xlsx")
+View(Data_1)
+Data_2 <- read_excel("SURVEY ONLINE ADVOCACY AND SOCIAL MEDIA'S ROLE IN COMMUNICATING EFFECTS OF ENVIRONMENTAL POLLUTION.xlsx")
+View(Data_2)
+plot_na_pareto(Data_1)
+plot_na_pareto(Data_2)
+#View(Impact)
+colnames(Data_1)
+
+# Select relevant variables
+efa_data <- Data_1[, c(10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 24, 25, 26, 27)]
+colnames(efa_data) <- c("Like", "Comment", "Share", "Participate", "Follow", 
+                        "Types", "Causes", "Effects", "Impact", "Solutions", 
+                        "Habits", "Policies", "Advocacy1", "Advocacy2")
+
+# Correlation matrix
+cor_matrix <- cor(efa_data, use = "complete.obs")
+corrplot::corrplot(cor_matrix, method="circle")
+print(cor_matrix)
+
+# Step 3: Perform Factor Analysis
+
+fa_result <- fa(efa_data, nfactors = 4, rotate = "varimax")
+print(fa_result)
+print(fa_result$loadings, cutoff = 0.3)
+
+# Check KMO
+KMO(efa_data)
+# Bartlett's Test
+cortest.bartlett(efa_data)
+
+efa_result <- fa(efa_data, nfactors = 3, rotate = "oblimin", fm = "ml")
+
+print(efa_result$loadings, cutoff = 0.3)
+fa.diagram(efa_result)
+fa.diagram(fa_result)
+# Scree plot
+fa.parallel(efa_data, fa = "fa")
+factor_scores <- efa_result$scores
+
+# Confirmatory Analysis
+cfa_model <- '
+  Engagement =~ Like + Comment + Share + Participate + Follow
+  Knowledge =~ Types + Causes + Effects + Impact + Solutions
+  Behavior =~ Habits + Policies + Advocacy1 + Advocacy2
+'
+
+# Fit the CFA model
+cfa_fit <- cfa(cfa_model, data = efa_data)
+fitMeasures(cfa_fit, c("cfi", "tli", "rmsea", "srmr"))
+# View the summary and fit indices
+summary(cfa_fit, fit.measures = TRUE, standardized = TRUE)
+# Define structural model
+sem_model <- '
+  Engagement =~ Like + Comment + Share + Follow + Participate
+  Knowledge =~ Types + Causes + Effects + Solutions
+  Behavior  =~ Habits + Policies + Advocacy1 + Advocacy2
+
+  # Structural relationships
+  Knowledge ~ Engagement
+  Behavior ~ Knowledge + Engagement
+'
+# Fit SEM model
+sem_fit <- sem(sem_model, data = efa_data)
+
+# Model summary and fit indices
+summary(sem_fit, fit.measures = TRUE, standardized = TRUE)
+# Extract factor loadings
+loadings <- parameterEstimates(sem_fit, standardized = TRUE) %>%
+  filter(op == "=~")  # Filter for factor loadings
+
+ggplot(loadings, aes(x = rhs, y = std.all, fill = lhs)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(std.all, 2), "%")), 
+            position = position_dodge(0.9), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = NULL, x = "Indicator", y = NULL, fill = "Construct") +
+  scale_fill_brewer(palette = "Set2") +
+  theme_minimal(base_size = 14) +  
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),  
+    plot.subtitle = element_text(size = 14, face = "italic"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_blank(), 
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, face = "bold", color = "black"),   
+    legend.title = element_text(size = 12, face = "bold", colour = "black"),  
+    legend.text = element_text(size = 10, face = "bold", colour = "black"),
+    panel.grid = element_blank(),
+    legend.position = "none"  # Remove the legend
+  )
+
+
+# Extract path coefficients
+paths <- parameterEstimates(sem_fit, standardized = TRUE) %>%
+  filter(op == "~")  # Filter for regression paths
+
+# Plot path coefficients using ggplot2
+ggplot(paths, aes(x = rhs, y = std.all, fill = lhs)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Path Coefficients", x = "Predictor", y = "Standardized Coefficient", fill = "Dependent Variable") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Load necessary library
+
+
+# Plot the SEM path diagram
+semPaths(sem_fit, what = "std", layout = "tree", edge.label.cex = 0.8,
+         style = "lisrel", nCharNodes = 0, sizeMan = 8, sizeLat = 10,
+         edge.color = "black", node.color = "lightblue", fade = FALSE)
+
+
+# Extract residuals
+residuals <- residuals(sem_fit, type = "cor")$cov
+
+# Convert residuals to a data frame for plotting
+residuals_df <- as.data.frame(as.table(residuals))
+colnames(residuals_df) <- c("Var1", "Var2", "Residual")
+
+# Plot residuals using ggplot2
+ggplot(residuals_df, aes(x = Var1, y = Var2, fill = Residual)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "blue", midpoint = 0) +
+  labs(title = NULL, x = "Variable 1", y = "Variable 2", fill = "Residual") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+# Association
+                            
+#Gender
+chisq.test(Data_1$Gender, Data_1$How often do you engage in social media?)
+gender_filter_n <- Data_1%>%group_by(Gender, How often do you engage in social media?)%>%summarize(Cnt = n())%>%mutate(Per = (Cnt/sum(Cnt))*100)
+gender_filter_n$Gender <- as.factor(gender_filter_n$Gender)
+gender_filter_n$How often do you engage in social media? <- as.factor(gender_filter_n$How often do you engage in social media?)
+ggplot2::ggplot(gender_filter_n, aes(x = Gender, y = Cnt, fill = How often do you engage in social media?)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.3) + 
+  geom_text(aes(label = paste0(round(Per, 1), "%")), 
+            position = position_dodge(0.9), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = NULL,
+       x = NULL, y = NULL,
+       fill = NULL) +
+  scale_fill_brewer(palette = "Set2") +
+  
+  theme_minimal(base_size = 14) +  
+  
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),  
+    plot.subtitle = element_text(size = 14, face = "italic"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_blank(), 
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold",color="black"),   
+    legend.title = element_text(size = 12, face = "bold", colour = "black"),  
+    legend.text = element_text(size = 10,face = "bold", color="black"),
+    panel.grid = element_blank()
+  ) +
+  theme(legend.position = "bottom") 
+
+
+chisq.test(Data_1$Age, Data_1$How often do you engage in social media?)
+Age_filter_n <- Data_1%>%group_by(Age, How often do you engage in social media?)%>%summarize(Cnt = n())%>%mutate(Per = (Cnt/sum(Cnt))*100)
+Age_filter_n$Age <- as.factor(Age_filter_n$Age)
+Age_filter_n$How often do you engage in social media? <- as.factor(Age_filter_n$How often do you engage in social media?)
+ggplot2::ggplot(Age_filter_n, aes(x = Age, y = Cnt, fill = How often do you engage in social media?)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.3) + 
+  geom_text(aes(label = paste0(round(Per, 1), "%")), 
+            position = position_dodge(0.9), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = NULL,
+       x = NULL, y = NULL,
+       fill = NULL) +
+  scale_fill_brewer(palette = "Set2") +
+  
+  theme_minimal(base_size = 14) +  
+  
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),  
+    plot.subtitle = element_text(size = 14, face = "italic"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_blank(), 
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold",color="black"),   
+    legend.title = element_text(size = 12, face = "bold", colour = "black"),  
+    legend.text = element_text(size = 10,face = "bold", color="black"),
+    panel.grid = element_blank()
+  ) +
+  theme(legend.position = "bottom") 
+
+chisq.test(Data_1$Religion, Data_1$How often do you engage in social media?)
+Religion_filter_n <- Data_1%>%group_by(Religion, How often do you engage in social media?)%>%summarize(Cnt = n())%>%mutate(Per = (Cnt/sum(Cnt))*100)
+Religion_filter_n$Religion <- as.factor(Religion_filter_n$Religion)
+Religion_filter_n$How often do you engage in social media? <- as.factor(Religion_filter_n$How often do you engage in social media?)
+ggplot2::ggplot(Religion_filter_n, aes(x = Religion, y = Cnt, fill = How often do you engage in social media?)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.3) + 
+  geom_text(aes(label = paste0(round(Per, 1), "%")), 
+            position = position_dodge(0.9), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = NULL,
+       x = NULL, y = NULL,
+       fill = NULL) +
+  scale_fill_brewer(palette = "Set2") +
+  
+  theme_minimal(base_size = 14) +  
+  
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),  
+    plot.subtitle = element_text(size = 14, face = "italic"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_blank(), 
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold",color="black"),   
+    legend.title = element_text(size = 12, face = "bold", colour = "black"),  
+    legend.text = element_text(size = 10,face = "bold", color="black"),
+    panel.grid = element_blank()
+  ) +
+  theme(legend.position = "bottom") 
+
+
+chisq.test(Data_1$Level, Data_1$How often do you engage in social media?)
+Level_filter_n <- Data_1%>%group_by(Level, How often do you engage in social media?)%>%summarize(Cnt = n())%>%mutate(Per = (Cnt/sum(Cnt))*100)
+Level_filter_n$Level <- as.factor(Level_filter_n$Level)
+Level_filter_n$How often do you engage in social media? <- as.factor(Level_filter_n$How often do you engage in social media?)
+ggplot2::ggplot(Level_filter_n, aes(x = Level, y = Cnt, fill = How often do you engage in social media?)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.3) + 
+  geom_text(aes(label = paste0(round(Per, 1), "%")), 
+            position = position_dodge(0.9), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = NULL,
+       x = NULL, y = NULL,
+       fill = NULL) +
+  scale_fill_brewer(palette = "Set2") +
+  
+  theme_minimal(base_size = 14) +  
+  
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),  
+    plot.subtitle = element_text(size = 14, face = "italic"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_blank(), 
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold",color="black"),   
+    legend.title = element_text(size = 12, face = "bold", colour = "black"),  
+    legend.text = element_text(size = 10,face = "bold", color="black"),
+    panel.grid = element_blank()
+  ) +
+  theme(legend.position = "bottom") 
+
+
+desc_table <- Data_1  %>%gather(variable, value) %>%
+  group_by(variable, value) %>%
+  tally() %>%
+  mutate(percentage = n/sum(n)*100) %>%
+  arrange(variable, desc(n))
+#View(desc_table)
+write.csv(desc_table , file = "Supplementary_1.csv")
